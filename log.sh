@@ -1,1 +1,0 @@
-source ~/.oh-my-zsh/custom/plugins/zsh-color-logging/zsh-color-logging.plugin.zsh
