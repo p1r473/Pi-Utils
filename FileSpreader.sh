@@ -104,9 +104,17 @@ get_path_only() {
 # Determine the default destination based on the current hostname and path
 get_default_destination() {
     local src_path="$1"
-    local path_only="${src_path#*:}"  # Strip off the hostname from the path
+    local path_only
 
-    # Determine if the source is remote by checking for colon presence before stripping
+    # If the source path is local, get the full path using realpath
+    if [[ "$src_path" != *:* ]]; then
+        path_only=$(realpath "$src_path")
+    else
+        # If remote, just strip off the hostname
+        path_only="${src_path#*:}"
+    fi
+
+    # Determine if the source is remote by checking for colon presence
     if [[ "$src_path" == *:* ]]; then
         local src_hostname="${src_path%%:*}"
         # Check if the source hostname matches either known host and switch destination host accordingly
@@ -119,7 +127,7 @@ get_default_destination() {
             exit 1
         fi
     else
-        # Source is local, determine default remote destination
+        # Source is local, determine default remote destination based on current host
         if [[ "$HOSTNAME" == "$PRIMARY_HOST" ]]; then
             echo "$SECONDARY_HOST:$path_only"
         elif [[ "$HOSTNAME" == "$SECONDARY_HOST" ]]; then
