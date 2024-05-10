@@ -304,18 +304,20 @@ echo "Destination: $destination"
 
 if is_remote "${sources[0]}" && is_remote "$destination"; then
     echo "Remote to Remote transfer"
-    # Extract the necessary components from the source and destination paths
+    # Extract necessary components from the paths
     source_server="${sources[0]%%:*}"
     dest_server="${destination%%:*}"
     dest_path="${destination##*:}"
-
     # Construct the remote command to execute on the source server
-    remote_command="/home/pi/FileSpreader.sh ${delete_flag:+$delete_flag} ${dry_run_confirmation:+-f}"
+    remote_command="/home/pi/FileSpreader.sh"
+    [[ $delete_flag ]] && remote_command+=" $delete_flag"  # Include delete flag if set
+    [[ $dry_run_confirmation == "yes" ]] && remote_command+=" -f"  # Include non-interactive flag if set
+    # Properly quote the paths for the remote command
     remote_command+=" '${sources[*]}' '$dest_server:$dest_path'"
-    
     # SSH command to execute the rsync command on the source server
     rsync_command="ssh $source_server \"$remote_command\""
     echo "Executing on $source_server: $rsync_command"
+    # Execute the remote rsync command
     eval "$rsync_command"
 else
     if is_remote "${sources[0]}"; then
