@@ -13,7 +13,6 @@ colorize_output() {
 IsHost() {
     local hostname=$(echo "$1" | awk '{print tolower($0)}')
     local hosts_file="/etc/hosts"
-    echo "Checking if host $hostname is in hosts file."  # Debug
     if grep -wqi "\b$hostname\b" "$hosts_file"; then
         return 0
     else
@@ -117,10 +116,10 @@ elif [ $# -gt 0 ]; then
             fi
         else
             # If not a recognized host, treat input as a command
-            echo "No destination specified and '$input_host' is not a recognized host."
+            #echo "No destination specified and '$input_host' is not a recognized host."
             destination="${SECONDARY_HOSTNAME}"
             command="$input_host"
-            echo "Defaulting to $destination with command: $command"
+            #echo "Defaulting to $destination with command: $command"
         fi
     else
         # If hostname is resolved, prepare to use it as the destination
