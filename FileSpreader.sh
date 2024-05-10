@@ -33,18 +33,43 @@ check_source_existence() {
     fi
 }
 
-expand_remote_path() {
-    local remote_path="$1"
-    local remote_host="${remote_path%%:*}"
-    local remote_dir="${remote_path#*:}"
-
-    if [[ "$remote_dir" == *"*"* ]]; then
-        # Attempt to fetch and list files based on wildcard expansion
-        ssh "$remote_host" "ls $remote_dir 2>/dev/null" || echo "NO_MATCH"
+# Function to expand remote paths and handle quoting correctly
+expand_remote_paths() {
+    local src="$1"
+    local remote_host="${src%%:*}"
+    local remote_dir="${src#*:}"
+    local base_dir="${remote_dir%\/*}"  # Extract the directory portion before the last slash
+    local pattern="${remote_dir##*/}"   # Potentially a wildcard pattern
+    local expanded_sources=()
+    # Adjusting the command to handle directory inclusion properly
+    local cmd
+    if [[ "$pattern" == "*" ]]; then
+        # Command to list all files and directories, ensuring directories are included
+        cmd="find '$base_dir' -mindepth 1 -maxdepth 1; [ -d '$base_dir' ] && echo '$base_dir'"
+    elif [[ "$pattern" == *"*"* ]]; then
+        # Command to list matching files and directories
+        cmd="find '$base_dir' -mindepth 1 -maxdepth 1 -name '$pattern'; [ -d '$base_dir' ] && echo '$base_dir'"
     else
-        echo "$remote_path"
+        # Check if it's a specific file or directory and handle accordingly
+        cmd="if [ -d '$base_dir/$pattern' ] || [ -f '$base_dir/$pattern' ]; then echo '$base_dir/$pattern'; else echo 'NO_MATCH'; fi"
+    fi
+    local results=$(ssh -o ConnectTimeout=$SSH_timeout "$remote_host" "$cmd")
+    if [[ -z "$results" ]]; then
+        echo "NO_MATCH"
+        return 1  # Indicate failure to expand
+    else
+        # Process results into the correct format, ensuring proper quoting
+        while IFS= read -r line; do
+            if [[ -n "$line" && "$line" != "NO_MATCH" ]]; then
+                line="'$remote_host:$line'"
+                expanded_sources+=("$line")
+            fi
+        done <<< "$results"
+        printf "%s\n" "${expanded_sources[@]}"
+        return 0
     fi
 }
+
 
 # Function to check if a remote file or directory exists
 remote_file_exists() {
@@ -195,7 +220,7 @@ shift $((OPTIND-1))
 
 expanded_sources=()  # Prepare to collect expanded sources
 
-# Handling sources and destinations
+# Replacing the section where you process sources with the new function
 if [[ "$#" -eq 1 ]]; then
     sources=("$1")  # Single source scenario
     destination=$(get_default_destination "${sources[0]}")
@@ -203,30 +228,22 @@ if [[ "$#" -eq 1 ]]; then
 else
     input_sources=("${@:1:$#-1}")
     destination="${@: -1}"
-    expanded_sources=()
-
     for src in "${input_sources[@]}"; do
         if is_remote "$src" && [[ "$src" == *"*"* ]]; then
-            # Properly handle remote path expansion
-            expanded=$(expand_remote_path "$src")
-            if [[ "$expanded" != "NO_MATCH" && -n "$expanded" ]]; then
-                while IFS= read -r line; do
-                    if [[ -n "$line" ]]; then
-                        expanded_sources+=("${src%%:*}:$line")
-                    fi
-                done <<< "$expanded"
+            # Properly handle remote path expansion and assembly
+            expanded_sources_string=$(expand_remote_paths "$src")
+            if [ $? -eq 0 ]; then
+                IFS=$'\n' read -r -a expanded_sources <<< "$expanded_sources_string"
             else
-                echo "No matches found for $src"
+                echo "Failed to expand $src"
+                continue
             fi
         else
             expanded_sources+=("$src")
         fi
     done
-
-    # Always update sources from expanded sources to maintain consistency
     sources=("${expanded_sources[@]}")
 fi
-
 # After stripping hostnames if they match the current host
 source_paths=()
 for src in "${sources[@]}"; do
