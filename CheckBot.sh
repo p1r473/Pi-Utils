@@ -1,10 +1,10 @@
 #!/bin/bash
 
-curl_max_time=3 
+curl_max_time=3
 curl_connect_timeout=3
 #SCRIPT_DIR=$(dirname "$0")
 SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
-source "${SCRIPT_DIR}/.credentials.conf"
+source "${SCRIPT_DIR}/.credentials"
 source "${SCRIPT_DIR}/CheckBot.conf"
 source "${SCRIPT_DIR}/log.sh"
 
