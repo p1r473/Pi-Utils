@@ -33,7 +33,7 @@ check_source_existence() {
     fi
 }
 
-# Function to expand remote paths and handle quoting correctly
+# Function to handle remote path expansion with wildcards, including empty directories
 expand_remote_paths() {
     local src="$1"
     local remote_host="${src%%:*}"
@@ -41,16 +41,13 @@ expand_remote_paths() {
     local base_dir="${remote_dir%\/*}"  # Extract the directory portion before the last slash
     local pattern="${remote_dir##*/}"   # Potentially a wildcard pattern
     local expanded_sources=()
-    # Adjusting the command to handle directory inclusion properly
+    # Command to handle file and directory expansion
     local cmd
     if [[ "$pattern" == "*" ]]; then
-        # Command to list all files and directories, ensuring directories are included
         cmd="find '$base_dir' -mindepth 1 -maxdepth 1; [ -d '$base_dir' ] && echo '$base_dir'"
     elif [[ "$pattern" == *"*"* ]]; then
-        # Command to list matching files and directories
         cmd="find '$base_dir' -mindepth 1 -maxdepth 1 -name '$pattern'; [ -d '$base_dir' ] && echo '$base_dir'"
     else
-        # Check if it's a specific file or directory and handle accordingly
         cmd="if [ -d '$base_dir/$pattern' ] || [ -f '$base_dir/$pattern' ]; then echo '$base_dir/$pattern'; else echo 'NO_MATCH'; fi"
     fi
     local results=$(ssh -o ConnectTimeout=$SSH_timeout "$remote_host" "$cmd")
@@ -58,7 +55,7 @@ expand_remote_paths() {
         echo "NO_MATCH"
         return 1  # Indicate failure to expand
     else
-        # Process results into the correct format, ensuring proper quoting
+        # Process results into the correct format, ensuring proper quoting and handling empty directories
         while IFS= read -r line; do
             if [[ -n "$line" && "$line" != "NO_MATCH" ]]; then
                 line="'$remote_host:$line'"
@@ -70,6 +67,25 @@ expand_remote_paths() {
     fi
 }
 
+# Function to handle local source expansion with wildcards
+expand_local_sources() {
+    local src="$1"
+    local path="${src#*:}"  # Extract the path without the hostname
+    local expanded_paths=()
+    # Perform glob expansion
+    eval "expanded_paths=($path)"
+    for expanded in "${expanded_paths[@]}"; do
+        if [[ -e $expanded ]]; then
+            expanded_paths+=("$expanded")
+        fi
+    done
+    if [[ ${#expanded_paths[@]} -eq 0 ]]; then
+        echo "No valid files found at the specified path."
+        return 1
+    else
+        printf "'%s' " "${expanded_paths[@]}"
+    fi
+}
 
 # Function to check if a remote file or directory exists
 remote_file_exists() {
@@ -215,12 +231,10 @@ while getopts "fd" opt; do
   esac
 done
 
-# After processing options
+# Processing sources with handling both local and remote wildcards
 shift $((OPTIND-1))
-
 expanded_sources=()  # Prepare to collect expanded sources
 
-# Replacing the section where you process sources with the new function
 if [[ "$#" -eq 1 ]]; then
     sources=("$1")  # Single source scenario
     destination=$(get_default_destination "${sources[0]}")
@@ -229,8 +243,18 @@ else
     input_sources=("${@:1:$#-1}")
     destination="${@: -1}"
     for src in "${input_sources[@]}"; do
-        if is_remote "$src" && [[ "$src" == *"*"* ]]; then
-            # Properly handle remote path expansion and assembly
+        if [[ "$src" =~ "$PRIMARY_HOST:"* ]] && [[ "$(hostname)" == "$PRIMARY_HOST" ]]; then
+            # Local sources with hostname and wildcards
+            local_path="${src#*:}"
+            expanded=($(expand_local_sources "$src"))
+            if [[ $? -eq 0 ]]; then
+                expanded_sources+=("${expanded[@]}")
+            else
+                echo "Failed to expand $src"
+                continue
+            fi
+        elif is_remote "$src" && [[ "$src" == *"*"* ]]; then
+            # Remote sources with wildcards
             expanded_sources_string=$(expand_remote_paths "$src")
             if [ $? -eq 0 ]; then
                 IFS=$'\n' read -r -a expanded_sources <<< "$expanded_sources_string"
@@ -239,6 +263,7 @@ else
                 continue
             fi
         else
+            # Direct inclusion of paths without expansion
             expanded_sources+=("$src")
         fi
     done
@@ -262,52 +287,27 @@ for path in "${source_paths[@]}"; do
     rsync_sources+="'$path' "  # Append each path, properly quoted
 done
 
-# Check if the basename of the source and destination are the same
-src_base_name=$(basename "$(get_path_only "${sources[-1]}")")
-dest_base_name=$(basename "$(get_path_only "$destination")")
-
-# Determine the type of operation
-if [[ "$src_base_name" == "$dest_base_name" ]]; then
-    # Adjust destination to sync directly to the path instead of subdirectory
-    destination_path=$(dirname "$destination")
-else
-    destination_path="$destination"
-fi
-
 echo "Sources: ${sources[*]}"
 echo "Destination: $destination"
 
 if is_remote "${sources[0]}" && is_remote "$destination"; then
     echo "Remote to Remote transfer"
-    # Extract necessary components from the paths
     source_server="${sources[0]%%:*}"
     dest_server="${destination%%:*}"
     dest_path="${destination##*:}"
-
-    # Construct the remote command to execute on the source server
-    remote_command="/home/pi/FileSpreader.sh"
-    [[ $delete_flag ]] && remote_command+=" $delete_flag"  # Include delete flag if set
-    [[ $dry_run_confirmation == "yes" ]] && remote_command+=" -f"  # Include non-interactive flag if set
-
-    # Properly quote the paths for the remote command
+    remote_command="/home/pi/FileSpreader.sh ${delete_flag:+$delete_flag} ${dry_run_confirmation:+-f}"
     remote_command+=" '${sources[*]}' '$dest_server:$dest_path'"
-
-    # SSH command to execute the rsync command on the source server
     rsync_command="ssh $source_server \"$remote_command\""
     echo "Executing on $source_server: $rsync_command"
-
-    # Execute the remote rsync command
     eval "$rsync_command"
 else
     if is_remote "${sources[0]}"; then
         echo "Remote to Local transfer"
-        rsync_command="rsync -ave ssh $rsync_sources '$destination' $delete_flag"
     elif is_remote "$destination"; then
         echo "Local to Remote transfer"
-        rsync_command="rsync -ave ssh $rsync_sources '$destination' $delete_flag"
     else
         echo "Local to Local transfer"
-        rsync_command="rsync -av $rsync_sources '$destination' $delete_flag"
     fi
+    rsync_command="rsync -ave ssh $rsync_sources '$destination' ${delete_flag:+$delete_flag}"
     perform_rsync "$rsync_command" "$dry_run_confirmation"
 fi
