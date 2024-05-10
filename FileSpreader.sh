@@ -287,16 +287,33 @@ for path in "${source_paths[@]}"; do
     rsync_sources+="'$path' "  # Append each path, properly quoted
 done
 
+# After determining sources and destination:
+source_basename=$(basename "$(get_path_only "${sources[-1]}")")
+destination_basename=$(basename "$(get_path_only "$destination")")
+
+if [ "$source_basename" == "$destination_basename" ]; then
+    # Adjust destination to ensure we are not creating a subdirectory when names match
+    destination_path=$(dirname "$destination")
+else
+    destination_path="$destination"
+fi
+
+
 echo "Sources: ${sources[*]}"
 echo "Destination: $destination"
 
 if is_remote "${sources[0]}" && is_remote "$destination"; then
     echo "Remote to Remote transfer"
+    # Extract the necessary components from the source and destination paths
     source_server="${sources[0]%%:*}"
     dest_server="${destination%%:*}"
     dest_path="${destination##*:}"
+
+    # Construct the remote command to execute on the source server
     remote_command="/home/pi/FileSpreader.sh ${delete_flag:+$delete_flag} ${dry_run_confirmation:+-f}"
     remote_command+=" '${sources[*]}' '$dest_server:$dest_path'"
+    
+    # SSH command to execute the rsync command on the source server
     rsync_command="ssh $source_server \"$remote_command\""
     echo "Executing on $source_server: $rsync_command"
     eval "$rsync_command"
@@ -308,6 +325,6 @@ else
     else
         echo "Local to Local transfer"
     fi
-    rsync_command="rsync -ave ssh $rsync_sources '$destination' ${delete_flag:+$delete_flag}"
+    rsync_command="rsync -ave ssh $rsync_sources '$destination_path' ${delete_flag:+$delete_flag}"
     perform_rsync "$rsync_command" "$dry_run_confirmation"
 fi
