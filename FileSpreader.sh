@@ -33,6 +33,19 @@ check_source_existence() {
     fi
 }
 
+expand_remote_path() {
+    local remote_path="$1"
+    local remote_host="${remote_path%%:*}"
+    local remote_dir="${remote_path#*:}"
+
+    if [[ "$remote_dir" == *"*"* ]]; then
+        # Attempt to fetch and list files based on wildcard expansion
+        ssh "$remote_host" "ls $remote_dir 2>/dev/null" || echo "NO_MATCH"
+    else
+        echo "$remote_path"
+    fi
+}
+
 # Function to check if a remote file or directory exists
 remote_file_exists() {
     local remote_path="$1"
@@ -169,16 +182,41 @@ while getopts "fd" opt; do
   esac
 done
 
-# Shift off the options and their arguments
+# After processing options
 shift $((OPTIND-1))
 
+expanded_sources=()  # Prepare to collect expanded sources
+
+# Handling sources and destinations
 if [[ "$#" -eq 1 ]]; then
-    sources=("$1")  # Handle a single source as an array for uniform processing
+    sources=("$1")  # Single source scenario
     destination=$(get_default_destination "${sources[0]}")
     echo "Only one path provided. Defaulting destination to: $destination"
 else
-    sources=("${@:1:$#-1}")
+    input_sources=("${@:1:$#-1}")
     destination="${@: -1}"
+    expanded_sources=()
+
+    for src in "${input_sources[@]}"; do
+        if is_remote "$src" && [[ "$src" == *"*"* ]]; then
+            # Properly handle remote path expansion
+            expanded=$(expand_remote_path "$src")
+            if [[ "$expanded" != "NO_MATCH" && -n "$expanded" ]]; then
+                while IFS= read -r line; do
+                    if [[ -n "$line" ]]; then
+                        expanded_sources+=("${src%%:*}:$line")
+                    fi
+                done <<< "$expanded"
+            else
+                echo "No matches found for $src"
+            fi
+        else
+            expanded_sources+=("$src")
+        fi
+    done
+
+    # Always update sources from expanded sources to maintain consistency
+    sources=("${expanded_sources[@]}")
 fi
 
 # After stripping hostnames if they match the current host
