@@ -58,7 +58,7 @@ resolve_hostname() {
     local resolved_ip=$(nslookup "$1" 2>/dev/null | awk '/^Address: / { if (NR>1) {print $2} }' | tail -n 1)
     
     if [[ -z "$resolved_ip" ]]; then
-        echo "Failed to resolve hostname '$1'." >&2
+        #echo "Failed to resolve hostname '$1'." >&2
         return 1  # Return failure
     else
         echo "$resolved_ip"
