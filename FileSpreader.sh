@@ -23,6 +23,13 @@ remove_hostname_if_current() {
     fi
 }
 
+# Function to remove trailing slash from a path
+remove_trailing_slash() {
+    local path="$1"
+    # Remove trailing slash unless the path is just a single slash
+    echo "${path%/}"
+}
+
 # Determine if source is remote or local and check existence
 check_source_existence() {
     local path="$1"
@@ -118,11 +125,9 @@ ensure_destination_directory() {
 is_remote() {
     local path="$1"
     local path_hostname="${path%%:*}"  # Extract the hostname from the path
-
     # Normalize to lowercase for comparison
     local normalized_path_hostname=$(echo "$path_hostname" | awk '{print tolower($0)}')
     local normalized_hostname=$(echo "$HOSTNAME" | awk '{print tolower($0)}')
-
     # Check if the path contains a colon and the hostname part is not the current hostname
     if [[ "$path" == *":"* ]] && [[ "$normalized_path_hostname" == "$normalized_hostname" ]]; then
         return 1  # It's local
@@ -133,12 +138,37 @@ is_remote() {
     fi
 }
 
+
 # Extract path without the server part
 get_path_only() {
     if is_remote "$1"; then
         echo "${1##*:}"
     else
         echo "$1"
+    fi
+}
+
+# Function to extract base directory of a path (before the last '/')
+get_base_directory() {
+    local path="$1"
+    echo "$(dirname "$path")"
+}
+
+different_base_dirs() {
+    local -a base_dirs
+    for src in "$@"; do
+        base_dir=$(get_base_directory "$src")
+        base_dirs+=("$base_dir")
+    done
+
+    # Remove duplicates and get unique base directories
+    local -a unique_dirs=($(echo "${base_dirs[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+
+    # If there are more than one unique base directory, return true (trigger full path usage)
+    if [[ "${#unique_dirs[@]}" -gt 1 ]]; then
+        return 0  # More than one unique base directory
+    else
+        return 1  # Only one base directory
     fi
 }
 
@@ -180,13 +210,12 @@ get_default_destination() {
     fi
 }
 
-
 perform_rsync() {
     local rsync_command=$1
     local non_interactive=$2
     # Perform a dry run if the non-interactive flag is not set to 'yes'
     if [ "$non_interactive" != "yes" ]; then
-        echo "Performing ry run command: $rsync_command -n"
+        echo "Performing dry run command: $rsync_command -n"
         eval "$rsync_command -n"
         if [ $? -eq 0 ]; then
             echo "Dry run complete. The above files would be copied."
@@ -221,6 +250,7 @@ fi
 # Initialize flags
 delete_flag=""
 dry_run_confirmation="no"  # Default to 'no' for non-interactive
+use_relative="false"  # Default to not use relative paths
 
 # Process flags
 while getopts "fd" opt; do
@@ -234,6 +264,13 @@ done
 # Processing sources with handling both local and remote wildcards
 shift $((OPTIND-1))
 expanded_sources=()  # Prepare to collect expanded sources
+
+# Remove trailing slashes from user inputs
+for i in "$@"; do
+    normalized_paths+=("$(remove_trailing_slash "$i")")
+done
+# Reassign normalized paths to positional parameters
+set -- "${normalized_paths[@]}"
 
 if [[ "$#" -eq 1 ]]; then
     sources=("$1")  # Single source scenario
@@ -276,9 +313,27 @@ for src in "${sources[@]}"; do
     source_paths+=("$modified_src")  # Collect modified source paths
 done
 
+# Normalize destination to include trailing slash if it's meant to be root.
+if [[ "$destination" == "" || "$destination" == *":" ]]; then
+    destination="${destination}/"
+fi
+# Remove the hostname if it matches the current host, making the destination path local.
 destination=$(remove_hostname_if_current "$destination")
-if is_remote "$destination"; then
-    ensure_destination_directory "$destination"
+
+# Check if the destination is considered local root or remote root and adjust accordingly.
+if [[ "$destination" == "/" || "$destination" == "$HOSTNAME:/" ]]; then
+    destination="/"
+elif [[ "$destination" == *":/" ]]; then
+    remote_host="${destination%%:*}"
+    destination="$remote_host:/"
+fi
+
+
+
+# Change the logic to use full source paths in the destination if different_base_dirs and destination is root
+if different_base_dirs "${source_paths[@]}" && [[ "$destination" == "/" || "$destination" == *":/" ]]; then
+    echo "Source files have different base directories, and destination is root (/). Using full source paths for destination."
+    use_relative="true"  # Enable relative path usage
 fi
 
 # Form the rsync command with individually quoted source paths
@@ -287,13 +342,38 @@ for path in "${source_paths[@]}"; do
     rsync_sources+="'$path' "  # Append each path, properly quoted
 done
 
+# Include -R flag for relative paths if use_relative is true
+rsync_command="rsync -ave ssh"
+[[ "$use_relative" == "true" ]] && rsync_command+=" -R"
+if is_remote "${sources[0]}" && [[ "$destination" == "/" ]]; then
+    # Adjust destination for remote-to-local with root as destination
+    rsync_command+=" $rsync_sources './' ${delete_flag:+$delete_flag}"
+else
+    rsync_command+=" $rsync_sources '$destination' ${delete_flag:+$delete_flag}"
+fi
+
+# Ensure destination ends with a single slash if it is root directory
+if [[ "$destination" == *":" ]]; then
+    destination="${destination}/"
+fi
+
+if is_remote "$destination"; then
+    ensure_destination_directory "$destination"
+fi
+
 # After determining sources and destination:
 source_basename=$(basename "$(get_path_only "${sources[-1]}")")
 destination_basename=$(basename "$(get_path_only "$destination")")
 
+# If the source and destination basenames are the same, we should avoid creating an extra subdirectory
 if [ "$source_basename" == "$destination_basename" ]; then
-    # Adjust destination to ensure we are not creating a subdirectory when names match
-    destination_path=$(dirname "$destination")
+    # If the destination is root, leave the destination as is, but prevent subdirectory creation
+    if [[ "$destination" == "/" || "$destination" == *":/" ]]; then
+        destination_path="$destination"
+    else
+        # Otherwise, set the destination to its parent directory
+        destination_path=$(dirname "$destination")
+    fi
 else
     destination_path="$destination"
 fi
@@ -320,13 +400,18 @@ if is_remote "${sources[0]}" && is_remote "$destination"; then
     # Execute the remote rsync command
     eval "$rsync_command"
 else
-    if is_remote "${sources[0]}"; then
-        echo "Remote to Local transfer"
-    elif is_remote "$destination"; then
-        echo "Local to Remote transfer"
+    if is_remote "${sources[0]}" && is_remote "$destination"; then
+        echo "Remote to Remote transfer"
+        # Construct the SSH command for remote-to-remote transfers
+        source_server="${sources[0]%%:*}"
+        remote_command="/home/pi/FileSpreader.sh ${sources[*]} $destination ${delete_flag:+$delete_flag}"
+        rsync_command="ssh $source_server \"$remote_command\""
+        echo "Executing on $source_server: $rsync_command"
+        eval "$rsync_command"
     else
-        echo "Local to Local transfer"
+        # Local to Local or Local to Remote or Remote to Local transfer
+        echo "Executing: $rsync_command"
+        perform_rsync "$rsync_command" "$dry_run_confirmation"
     fi
-    rsync_command="rsync -ave ssh $rsync_sources '$destination_path' ${delete_flag:+$delete_flag}"
-    perform_rsync "$rsync_command" "$dry_run_confirmation"
 fi
+
