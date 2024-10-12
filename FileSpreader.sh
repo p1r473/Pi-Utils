@@ -213,6 +213,11 @@ get_default_destination() {
 perform_rsync() {
     local rsync_command=$1
     local non_interactive=$2
+    # Add a trailing slash to the source path if needed to avoid creating an extra subdirectory
+    if [[ "$source_basename" == "$destination_basename" ]]; then
+        # Add a trailing slash to the source path
+        rsync_sources="${rsync_sources%/}/"
+    fi
     # Perform a dry run if the non-interactive flag is not set to 'yes'
     if [ "$non_interactive" != "yes" ]; then
         echo "Performing dry run command: $rsync_command -n"
@@ -235,6 +240,7 @@ perform_rsync() {
         eval "$rsync_command"
     fi
 }
+
 
 # Check if the first argument is --help or if no arguments are provided
 if [[ "$1" == "--help" ]] || [[ $# -eq 0 ]]; then
@@ -339,6 +345,10 @@ fi
 # Form the rsync command with individually quoted source paths
 rsync_sources=""
 for path in "${source_paths[@]}"; do
+    # Add trailing slash if the source is a directory to copy contents only
+    if [[ -d "$path" ]]; then
+        path="${path%/}/"
+    fi
     rsync_sources+="'$path' "  # Append each path, properly quoted
 done
 
@@ -347,10 +357,11 @@ rsync_command="rsync -ave ssh"
 [[ "$use_relative" == "true" ]] && rsync_command+=" -R"
 if is_remote "${sources[0]}" && [[ "$destination" == "/" ]]; then
     # Adjust destination for remote-to-local with root as destination
-    rsync_command+=" $rsync_sources './' ${delete_flag:+$delete_flag}"
+    rsync_command+=" $rsync_sources '/' ${delete_flag:+$delete_flag}"
 else
     rsync_command+=" $rsync_sources '$destination' ${delete_flag:+$delete_flag}"
 fi
+
 
 # Ensure destination ends with a single slash if it is root directory
 if [[ "$destination" == *":" ]]; then
@@ -377,7 +388,6 @@ if [ "$source_basename" == "$destination_basename" ]; then
 else
     destination_path="$destination"
 fi
-
 
 echo "Sources: ${sources[*]}"
 echo "Destination: $destination"
