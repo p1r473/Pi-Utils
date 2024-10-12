@@ -1,7 +1,7 @@
 #!/bin/bash
 
-max_timeout=5
-connect_timeout=5
+max_timeout=10
+connect_timeout=10
 retries=3
 
 source /home/pi/log.sh
@@ -9,7 +9,7 @@ source /home/pi/log.sh
 fetch_isp() {
   local attempt=1
   while [ $attempt -le $retries ]; do
-    isp=$(curl -sSk --ipv4 --max-time $max_timeout --connect-timeout $connect_timeout ipinfo.io/org?token=abfaf07ed42402)
+    isp=$(curl -sSk --ipv4 --max-time $max_timeout --connect-timeout $connect_timeout http://ipinfo.io/org?token=abfaf07ed42402)
     if [ -n "$isp" ]; then  # Check if variable is non-empty
       echo "$isp"
       return 0
@@ -29,7 +29,7 @@ if [ $? -eq 0 ]; then  # Check if fetch_isp was successful
   if echo "$isp" | grep -qi 'Rogers'; then
     ecrit "ISP failed over to Rogers" true
     exit 1
-  elif echo "$isp" | grep -qi 'CIK'; then
+  elif echo "$isp" | grep -qi 'TekSavvy'; then
     case "$HOSTNAME" in
       Monkeebutt)
         exit 0

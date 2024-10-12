@@ -5,6 +5,22 @@ SecondaryHostname="Monkeebutt"
 JUMPBOX="BlackPearl"
 PING_COUNT=$2
 
+sshukh () {
+  output=$(\ssh "$@" 2>&1 | tee /dev/tty)
+  error=$(echo $output | tail -1)
+  if [[ "$error" == "Host key verification failed."* ]]; then
+    host=$(cut -d'@' -f2 <<< $1)
+    while true; do
+      read -p "Update known_hosts? [y/n] " yn
+      case $yn in
+        [Yy]* ) ssh-keygen -R $host && \ssh "$@"; break;;
+        [Nn]* ) break;;
+        * ) echo "Please answer y or n.";;
+      esac
+    done
+  fi
+}
+
 # Function to interpret color codes for any command output
 colorize_output() {
   awk '{ gsub(/\\e/, "\x1b"); print }'
@@ -13,7 +29,7 @@ colorize_output() {
 IsHost() {
     local hostname=$(echo "$1" | awk '{print tolower($0)}')
     local hosts_file="/etc/hosts"
-    echo "Checking if host $hostname is in hosts file."  # Debug
+    #echo "Checking if host $hostname is in hosts file."  # Debug
     if grep -wqi "\b$hostname\b" "$hosts_file"; then
         return 0
     else
@@ -31,41 +47,50 @@ IsPrivateIP() {
     fi
 }
 
-IsDifferentSubnet() {
-    local local_ip=$(hostname -I | awk '{print $1}')
-    local target_ip=$(resolve_hostname "$1")
-    if [[ -z "$target_ip" ]]; then
-        echo "No IP found for $1. Assuming different subnet."
-        return 0  # Assume different subnet if no IP could be found
-    fi
-    local local_subnet=${local_ip%.*}
-    local target_subnet=${target_ip%.*}
-    #echo "Comparing subnets: local ($local_subnet), target ($target_subnet)"
-    if [[ "$local_subnet" != "$target_subnet" ]] && IsPrivateIP "$target_ip"; then
-        return 0 # True, different subnet and target IP is private
-    else
-        return 1 # False, same subnet or target IP is not private
-    fi
-}
-
+# Updated resolve_hostname function to use getent instead of nslookup
 resolve_hostname() {
-    # First check if the input is already an IP address
-    if [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$1"
+    local input="$1"
+    
+    # If the input is already an IP address, return it
+    if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$input"
         return 0  # Return success because it's already an IP address
     fi
 
-    # Use nslookup to resolve the hostname
-    local resolved_ip=$(nslookup "$1" 2>/dev/null | awk '/^Address: / { if (NR>1) {print $2} }' | tail -n 1)
-    
+    # Use getent to resolve the hostname to an IP address
+    local resolved_ip
+    resolved_ip=$(getent hosts "$input" | awk '{ print $1 }')
+
     if [[ -z "$resolved_ip" ]]; then
-        echo "Failed to resolve hostname '$1'." >&2
+        #echo "Failed to resolve hostname '$input'." >&2
         return 1  # Return failure
     else
         echo "$resolved_ip"
         return 0  # Return success
     fi
 }
+
+# Updated IsDifferentSubnet function with improved logic
+IsDifferentSubnet() {
+    local local_ip=$(hostname -I | awk '{print $1}')
+    local target_ip=$(resolve_hostname "$1")
+
+    if [[ -z "$target_ip" ]]; then
+        return 0  # Assume different subnet if no IP could be found
+    fi
+
+    # Extract the first three octets (subnet) for both local and target IPs
+    local local_subnet=${local_ip%.*}
+    local target_subnet=${target_ip%.*}
+
+    # Compare the subnets
+    if [[ "$local_subnet" == "$target_subnet" ]]; then
+        return 1  # False, same subnet
+    else
+        return 0  # True, different subnet
+    fi
+}
+
 
 if [ $# -eq 0 ]; then
     case $HOSTNAME in
@@ -115,9 +140,9 @@ if [[ -n "$PING_COUNT" ]]; then
     pingc="-c $PING_COUNT "
 fi
 
-if IsDifferentSubnet "$destination"; then
-     echo "Using jump box: ssh -J $JUMPBOX ${destination} ping $pingc${destination}" >&2
-     /usr/bin/ssh -o ConnectTimeout=$SSH_timeout "$JUMPBOX" "ping $pingc${destination}" | colorize_output
+if IsDifferentSubnet "$destination" && IsPrivateIP "$destination"; then
+    echo "Using jump box: ssh -J $JUMPBOX ${destination} ping $pingc${destination}" >&2
+    sshukh -o ConnectTimeout=$SSH_timeout "$JUMPBOX" "ping $pingc${destination}" | colorize_output
 else
-    /usr/bin/ping "${destination}" | colorize_output
+    command ping "${destination}" | colorize_output
 fi

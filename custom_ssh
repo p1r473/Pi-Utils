@@ -5,6 +5,22 @@ SECONDARY_HOSTNAME="Monkeebutt"
 JUMPBOX="BlackPearl"
 command=""
 
+sshukh () {
+  output=$(\ssh "$@" 2>&1 | tee /dev/tty)
+  error=$(echo $output | tail -1)
+  if [[ "$error" == "Host key verification failed."* ]]; then
+    host=$(cut -d'@' -f2 <<< $1)
+    while true; do
+      read -p "Update known_hosts? [y/n] " yn
+      case $yn in
+        [Yy]* ) ssh-keygen -R $host && \ssh "$@"; break;;
+        [Nn]* ) break;;
+        * ) echo "Please answer y or n.";;
+      esac
+    done
+  fi
+}
+
 # Function to interpret color codes for any command output
 colorize_output() {
   awk '{ gsub(/\\e/, "\x1b"); print }'
@@ -13,6 +29,7 @@ colorize_output() {
 IsHost() {
     local hostname=$(echo "$1" | awk '{print tolower($0)}')
     local hosts_file="/etc/hosts"
+    #echo "Checking if host $hostname is in hosts file."  # Debug
     if grep -wqi "\b$hostname\b" "$hosts_file"; then
         return 0
     else
@@ -30,39 +47,47 @@ IsPrivateIP() {
     fi
 }
 
-IsDifferentSubnet() {
-    local local_ip=$(hostname -I | awk '{print $1}')
-    local target_ip=$(resolve_hostname "$1")
-    if [[ -z "$target_ip" ]]; then
-        echo "No IP found for $1. Assuming different subnet."
-        return 0  # Assume different subnet if no IP could be found
-    fi
-    local local_subnet=${local_ip%.*}
-    local target_subnet=${target_ip%.*}
-    #echo "Comparing subnets: local ($local_subnet), target ($target_subnet)"
-    if [[ "$local_subnet" != "$target_subnet" ]] && IsPrivateIP "$target_ip"; then
-        return 0 # True, different subnet and target IP is private
-    else
-        return 1 # False, same subnet or target IP is not private
-    fi
-}
-
+# Updated resolve_hostname function to use getent instead of nslookup
 resolve_hostname() {
-    # First check if the input is already an IP address
-    if [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$1"
+    local input="$1"
+    
+    # If the input is already an IP address, return it
+    if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$input"
         return 0  # Return success because it's already an IP address
     fi
 
-    # Use nslookup to resolve the hostname
-    local resolved_ip=$(nslookup "$1" 2>/dev/null | awk '/^Address: / { if (NR>1) {print $2} }' | tail -n 1)
-    
+    # Use getent to resolve the hostname to an IP address
+    local resolved_ip
+    resolved_ip=$(getent hosts "$input" | awk '{ print $1 }')
+
     if [[ -z "$resolved_ip" ]]; then
-        #echo "Failed to resolve hostname '$1'." >&2
+        #echo "Failed to resolve hostname '$input'." >&2
         return 1  # Return failure
     else
         echo "$resolved_ip"
         return 0  # Return success
+    fi
+}
+
+# Updated IsDifferentSubnet function with improved logic
+IsDifferentSubnet() {
+    local local_ip=$(hostname -I | awk '{print $1}')
+    local target_ip=$(resolve_hostname "$1")
+
+    if [[ -z "$target_ip" ]]; then
+        return 0  # Assume different subnet if no IP could be found
+    fi
+
+    # Extract the first three octets (subnet) for both local and target IPs
+    local local_subnet=${local_ip%.*}
+    local target_subnet=${target_ip%.*}
+
+    # Compare the subnets
+    if [[ "$local_subnet" == "$target_subnet" ]]; then
+        return 1  # False, same subnet
+    else
+        return 0  # True, different subnet
     fi
 }
 
@@ -79,9 +104,11 @@ extract_username() {
 if [ $# -eq 0 ]; then
     case $HOSTNAME in
         $PRIMARY_HOSTNAME)
+            #echo "Defaulting to $destination"
             destination="$SECONDARY_HOSTNAME"
             ;;
         $SECONDARY_HOSTNAME)
+            #echo "Defaulting to $destination"
             destination="$PRIMARY_HOSTNAME"
             ;;
         *)
@@ -89,7 +116,6 @@ if [ $# -eq 0 ]; then
             exit 1
             ;;
     esac
-    echo "Defaulting to $destination"
 elif [ $# -gt 0 ]; then
     input_host="$1"
     if [[ "$input_host" =~ @ ]]; then
@@ -99,28 +125,40 @@ elif [ $# -gt 0 ]; then
     # Resolve the hostname, but don't exit if it fails yet
     destination=$(resolve_hostname "$input_host")
     if [ $? -ne 0 ]; then
-        # Check if the input is a recognized host
-        if IsHost "$input_host"; then
-            destination="$input_host"
-            echo "Using local hostname: $destination"
-            username=$(extract_username "$1")
-            user_prefix=""
-            if [ -n "$username" ]; then
-                user_prefix="$username@"
-            fi
-            if [ $# -gt 1 ]; then
-                shift  # Remove the first argument which is the destination
-                command="$@"
-            else
-                command=""
-            fi
-        else
-            # If not a recognized host, treat input as a command
-            #echo "No destination specified and '$input_host' is not a recognized host."
-            destination="${SECONDARY_HOSTNAME}"
-            command="$input_host"
-            #echo "Defaulting to $destination with command: $command"
+    # Check if the input is a recognized host
+    if IsHost "$input_host"; then
+        destination="$input_host"
+        echo "Using local hostname: $destination"
+        username=$(extract_username "$1")
+        user_prefix=""
+        if [ -n "$username" ]; then
+            user_prefix="$username@"
         fi
+        if [ $# -gt 1 ]; then
+            shift  # Remove the first argument which is the destination
+            command="$@"
+        else
+            command=""
+        fi
+    else
+        # If not a recognized host, treat input as a command
+        # Set destination based on the current host
+        case $(hostname -s) in
+          $PRIMARY_HOSTNAME)
+            destination="$SECONDARY_HOSTNAME"
+            ;;
+          $SECONDARY_HOSTNAME)
+            destination="$PRIMARY_HOSTNAME"
+            ;;            *)
+                echo "Unknown current host. Exiting." >&2
+                exit 1
+                ;;
+        esac
+
+        # Set the command to the input value
+        command="$input_host"
+        #echo "Defaulting to destination: $destination with command: $command" >&2
+    fi
     else
         # If hostname is resolved, prepare to use it as the destination
         username=$(extract_username "$1")
@@ -140,21 +178,18 @@ else
     exit 1
 fi
 
-
-#echo "SSH command: /usr/bin/ssh -t -o ConnectTimeout=$SSH_timeout -J BlackPearl ${user_prefix}${destination} ${command}"
-
 if IsDifferentSubnet "$destination"; then
     echo "Using jump box: ssh -J $JUMPBOX ${destination} ${command}" >&2
     if [[ -n $command ]]; then
-        /usr/bin/ssh -t -o ConnectTimeout=$SSH_timeout -J "$JUMPBOX" "${user_prefix}${destination}" "${command}" | colorize_output
+        sshukh  -t -o ConnectTimeout=$SSH_timeout -J "$JUMPBOX" "${user_prefix}${destination}" "${command}" | colorize_output
     else
-        /usr/bin/ssh -t -o ConnectTimeout=$SSH_timeout -J "$JUMPBOX" "${user_prefix}${destination}"
+        sshukh -t -o ConnectTimeout=$SSH_timeout -J "$JUMPBOX" "${user_prefix}${destination}"
     fi
 
 else
     if [[ -n $command ]]; then
-        /usr/bin/ssh -t -o ConnectTimeout=$SSH_timeout "${user_prefix}${destination}" "${command}" | colorize_output
+        sshukh -t -o ConnectTimeout=$SSH_timeout "${user_prefix}${destination}" "${command}" | colorize_output
     else
-        /usr/bin/ssh -t -o ConnectTimeout=$SSH_timeout "${user_prefix}${destination}"
+        sshukh -t -o ConnectTimeout=$SSH_timeout "${user_prefix}${destination}"
     fi
 fi

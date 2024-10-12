@@ -1,7 +1,7 @@
 #!/bin/bash
 
-curl_max_time=3
-curl_connect_timeout=3
+curl_max_time=4
+curl_connect_timeout=4
 #SCRIPT_DIR=$(dirname "$0")
 SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/.credentials"
@@ -99,10 +99,6 @@ function should_run_check()
   last_run=$(grep -E "^${check_name}_last_run" "$tempfile" | cut -d "=" -f 2 | tr -d '\n')
   current_time=$(date +%s)
 
-  if [[ $last_run -eq -1 ]]; then
-    return 1
-  fi
-
   time_since_last_run=$((current_time - last_run))
 
   # echo "Check name: $check_name"
@@ -112,7 +108,9 @@ function should_run_check()
   # echo "Time since last run: $time_since_last_run"
   # echo "Timestamp in tempfile: $(grep -E "^${check_name}_last_run" "$tempfile")"
 
-  if [[ $time_since_last_run -ge $interval ]]; then
+  if [[ $last_run -eq -1 && $check_name != "ISP" ]]; then
+    return 1
+  elif [[ $time_since_last_run -ge $interval ]]; then
     return 1
   elif [[ $force -eq 1 ]]; then
     return 1
@@ -173,7 +171,7 @@ function check_DNS
   for i in "${!DNS_servers[@]}"; do
     server="${DNS_servers[i]}"
     #DNS_failure_counts[i]=0
-    for d in "${domains[@]}"; do 
+    for d in "${domains[@]}"; do
       #nslookup_output=$(nslookup -retry=$numDNSFailures -timeout=$timeout "$d" "$server" 2>&1)
       #nslookup_exit_code=$?
       #if [[ $nslookup_exit_code -eq 0 && ! $(echo "$nslookup_output" | grep -qiE "connection refused|no servers could be reached") ]]; then
@@ -207,34 +205,34 @@ function check_ISP
     checkISP=0
     return
   fi
-  ISP=$(curl -sSk --ipv4 --max-time $curl_max_time --connect-timeout $curl_connect_timeout https://ipinfo.io/org?token=$ipinfo_token)
+
+  #public_ip=$(curl -sSk --ipv4 --max-time $curl_max_time --connect-timeout $curl_connect_timeout http://ipinfo.io/ip)
+  #ISP=$(curl -sSk --ipv4 --max-time $curl_max_time --connect-timeout $curl_connect_timeout "http://ip-api.com/json/$public_ip" | jq -r '.isp')
+
+  #ipinfo.io limited to 50k/mo
+  #ISP=$(curl -sSk --ipv4 --max-time $curl_max_time --connect-timeout $curl_connect_timeout https://ipinfo.io/org) #?token=$ipinfo_token)
+
+  #ip-api.com limited to 45/min
+  ISP=$(curl -sSk --ipv4  "http://ip-api.com/json/" | jq -r '.as')
+
   if echo "$ISP" | grep -qi 'Rogers'; then
     ISP_success=0
     ((ISP_failure_count++))
-    ewarn "CheckBot warning that we are currently failed over to Rogers" false
-  elif echo "$ISP" | grep -qi 'CIK'; then
+  elif echo "$ISP" | grep -qi 'TekSavvy'; then
     if [[ $HOSTNAME == "Harbormaster" ]]
     then
       ISP_success=0
       ((ISP_failure_count++))
-      ewarn "CheckBot warning that we aren't currently connected to VPN" false
     else
       ISP_success=1
       ISP_failure_count=0
-      eok "CheckBot OK that we are currently connected to CIK" false
     fi
-  elif echo "$ISP" | grep -qi 'tzulo'; then
-    ISP_success=0
+  elif echo "$ISP" | grep -Eqi 'DataCamp|tzulo'; then
+    ISP_success=1
     ISP_failure_count=0
-    eok "CheckBot OK that we are currently connected to VPN" false
-  elif echo "$ISP" | grep -qi 'tzulo'; then
-    ISP_success=0
-    ISP_failure_count=0
-    eok "CheckBot OK that we are currently connected to VPN" false
   else
     ISP_success=0
     ((ISP_failure_count++))
-    ewarn "CheckBot warning that we are currently on an unknown ISP: $ISP" false
   fi
   update_timestamp "ISP" ISP_success
   return $ISP_failure_count
@@ -281,8 +279,8 @@ function check_VPN
     return
   fi
   KEYWORD='You are not connected to Mullvad'
-  IP=$(curl -sSk --ipv4 --max-time $curl_max_time --connect-timeout $curl_connect_timeout https://am.i.mullvad.net/connected)
-  if echo "$IP" | grep -q "$KEYWORD"; then
+  VPN=$(curl -sSk --ipv4 --max-time $curl_max_time --connect-timeout $curl_connect_timeout https://am.i.mullvad.net/connected)
+  if echo "$VPN" | grep -q "$KEYWORD"; then
     VPN_success=0
     ((VPN_failure_count++))
   else
@@ -452,10 +450,10 @@ fi
     ISP_failure_count=$?
   fi
   if [ $checkISP -eq 1 ] && [ $ISP_success -eq 1 ] ; then
-    eok "CheckBot OK that current ISP is CIK." false
+    eok "CheckBot OK that we are currently connected to ISP $ISP." false
   elif [ $checkISP -eq 1 ] && [ $ISP_success -eq 0 ] ; then
     #((ISP_failure_count >= numISPFailures)); then
-    eerror "CheckBot error that we are currently not connected to CIK ISP. There were $ISP_failure_count failures." false
+    eerror "CheckBot error that we are currently connected to ISP $ISP." false
   fi
 
   # check speed
@@ -468,7 +466,7 @@ fi
       eok "CheckBot OK that internet speeds are OK" false
   elif [ $checkSpeed -eq 1 ] && [ $speed_success -eq 0 ]; then
     #((speed_failure_count >= numSpeedFailures)); then
-      eerror "CheckBot error that internet speeds are low. There were $speed_failure_count failures." false
+      eerror "CheckBot error that internet speeds are low." false
   fi
 
   # check VPN
@@ -477,10 +475,10 @@ fi
     VPN_failure_count=$?
   fi
   if [ $checkVPN -eq 1 ] && [ $VPN_success -eq 1 ]; then
-    eok "CheckBot OK that we are connected to VPN" false
+    eok "CheckBot OK that $VPN" false
   elif [ $checkVPN -eq 1 ] && [ $VPN_success -eq 0 ]; then
     #((VPN_failure_count >= numVPNFailures)); then
-      eerror "CheckBot error that we were not connected to the VPN. There were $VPN_failure_count failures." false
+      eerror "CheckBot error that $VPN" false
       #for i in 1 2 3; do
     #for i in $(seq 1 $numVPNFailures); do
       #VPN_success=1

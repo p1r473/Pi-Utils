@@ -1,6 +1,10 @@
 #!/bin/bash
 SSH_timeout=3
 
+# Hosts to be restarted and shut down
+declare -a hosts_reboot=("Harbormaster" "Monkeebutt" "DevilsTriangle" "ShipwreckIsland" "ShipwreckCove" "ShipwreckCity") # "Shield" "BlackPearl" "pwnagotchi" "Tron" "NetMonitor" "DevilsThroat" "Steamdeck" "RumRunnersIsle" 
+declare -a hosts_shutdown=("Harbormaster" "Monkeebutt" "Shield" "DevilsTriangle" "ShipwreckIsland" "ShipwreckCove" "ShipwreckCity" "BlackPearl" "pwnagotchi" "Tron" "NetMonitor" "DevilsThroat" "Steamdeck" "RumRunnersIsle")
+
 title="Command Center online."
 prompt="Pick an option: "
 options=("Pihole Status" "Pihole Restart DNS" "Pihole Update Adlists" "Pihole Update Gravity" "Pihole Update" "Pihole Pause" "Pihole Resume" "Mullvad Status" "Mullvad Toggle [all]" "Mullvad Pause [all]" "Mullvad Resume [all]" "Mullvad Toggle [Router]" "Mullvad Pause [Router]" "Mullvad Resume [Router]" "Mullvad Toggle [Pi]" "Mullvad Pause [Pi]" "Mullvad Resume [Pi]" "Skynet Pause " "Skynet Resume" "Status Everything" "Pause Everything" "Resume Everything" "Siren Start" "Siren Stop" "Gaming Process Kill" "EmulationStation Start" "ScummVM Start" "Saved Games Backup" "Saved Games Restore" "RAM Usage" "CPU Usage" "Temperatures" "CPU Clock" "CPU Throttle" "GPU Clock" "Hardware" "Toggle Backlight" "Restart" "Restart Everything" "Shutdown" "Shutdown Everything" "Lock PC" "Unlock PC" "Lock Everything" "Brown Noise [Bedroom]" "Brown Noise [Office]" "Silence")
@@ -31,21 +35,21 @@ perform_action() {
     5 | pihole_update) echo "Updating Pihole"; echo $myHostname; pihole -up; echo $otherHostname; ssh "pihole -up";;
     6 | pause_Pihole) echo "Pausing Pihole"; echo $myHostname; pihole disable 30m; echo $otherHostname; ssh "pihole disable 30m";;
     7 | resume_Pihole) echo "Resuming Pihole"; echo $myHostname; pihole enable; echo $otherHostname; ssh "pihole enable";;
-    8 | status_Mullvad) echo "Mullvad Status"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh status"; echo $myHostname; /home/pi/Mullvad.sh status; echo $otherHostname; ssh "/home/pi/Mullvad.sh status";;
-    9 | toggle_Mullvad) echo "Toggling Mullvad [all]"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh toggle policy"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh toggle";;
-    10 | pause_Mullvad) echo "Pausing Mullvad [all]"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh stop"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh stop";;
-    11 | resume_Mullvad) echo "Resuming Mullvad [all]"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh start policy"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh start";;
-    12 | toggle_Mullvad_router) echo "Toggling Mullvad [Router]"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh toggle policy";;
-    13 | pause_Mullvad_router) echo "Pausing Mullvad [Router]"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh stop";;
-    14 | resume_Mullvad_router) echo "Resuming Mullvad [Router]"; echo "PortRoyal "; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh start policy";;
+    8 | status_Mullvad) echo "Mullvad Status"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh status"; echo $myHostname; /home/pi/Mullvad.sh status; echo $otherHostname; ssh "/home/pi/Mullvad.sh status";;
+    9 | toggle_Mullvad) echo "Toggling Mullvad [all]"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh toggle policy"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh toggle";;
+    10 | pause_Mullvad) echo "Pausing Mullvad [all]"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh stop"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh stop";;
+    11 | resume_Mullvad) echo "Resuming Mullvad [all]"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh start policy"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh start";;
+    12 | toggle_Mullvad_router) echo "Toggling Mullvad [Router]"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh toggle policy";;
+    13 | pause_Mullvad_router) echo "Pausing Mullvad [Router]"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh stop";;
+    14 | resume_Mullvad_router) echo "Resuming Mullvad [Router]"; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh start policy";;
     15 | toggle_Mullvad_router_pi) echo "Toggling Mullvad [Pi]"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh toggle";;
     16 | pause_Mullvad_pi) echo "Pausing Mullvad [Pi]"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh stop";;
     17 | resume_Mullvad_pi) echo "Resuming Mullvad [Pi]"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh start";;
-    18 | pause_Skynet) echo "Pausing Skynet"; ssh PortRoyal "/jffs/scripts/firewall disable";;
-    19 | resume_Skynet) echo "Resuming Skynet"; ssh PortRoyal "/jffs/scripts/firewall restart";;
-    20 | status) echo "Status Everything"; echo $myHostname; pihole status; /home/pi/Mullvad.sh status; echo "PortRoyal"; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh status"; echo $otherHostname; ssh "pihole status";  ssh otherHostname "/home/pi/Mullvad.sh status";;
-    21 | pause) echo "Pausing Everything"; echo $myHostname; pihole disable 30m; echo "PortRoyal"; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh stop"; ssh PortRoyal "/jffs/scripts/firewall disable"; echo $otherHostname; ssh "pihole disable 30m"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh disable";;
-    22 | resume) echo "Resuming Everything"; echo $myHostname; pihole enable; echo "PortRoyal"; ssh PortRoyal "/opt/etc/wireguard.d/Mullvad.sh start"; ssh PortRoyal "/jffs/scripts/firewall restart"; echo $otherHostname; ssh "pihole enable"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh start";;
+    18 | pause_Skynet) echo "Pausing Skynet"; ssh ShipwreckIsland "/jffs/scripts/firewall disable";;
+    19 | resume_Skynet) echo "Resuming Skynet"; ssh ShipwreckIsland "/jffs/scripts/firewall restart";;
+    20 | status) echo "Status Everything"; echo $myHostname; pihole status; /home/pi/Mullvad.sh status; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh status"; echo $otherHostname; ssh "pihole status";  ssh otherHostname "/home/pi/Mullvad.sh status";;
+    21 | pause) echo "Pausing Everything"; echo $myHostname; pihole disable 30m; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh stop"; ssh ShipwreckIsland "/jffs/scripts/firewall disable"; echo $otherHostname; ssh "pihole disable 30m"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh disable";;
+    22 | resume) echo "Resuming Everything"; echo $myHostname; pihole enable; echo "ShipwreckIsland"; ssh ShipwreckIsland "/opt/etc/wireguard.d/Mullvad.sh start"; ssh ShipwreckIsland "/jffs/scripts/firewall restart"; echo $otherHostname; ssh "pihole enable"; echo "Harbormaster"; ssh Harbormaster "/home/pi/Mullvad.sh start";;
     23 | start_siren) echo "Starting Siren"; /home/pi/Siren/SirenStart.sh;;
     24 | stop_siren) echo "Stopping Siren"; /home/pi/Siren/SirenStop.sh;;
     #for i in `cat hostlist`;do ssh -q $i kill `ssh -q $i ps -ef | grep <process name>|awk '{print $2}'`;done
@@ -66,9 +70,35 @@ perform_action() {
     36 | hardware) echo "Showing hardware"; /home/pi/monitor.sh;;
     37 | toggle_backlight) echo "Toggling backlight"; ssh Harbormaster "rpi-backlight -p toggle"; ssh Monkeebutt "sudo /home/pi/rpi-hdmi.sh toggle";;
     38 | reboot) echo "Restarting"; reboot;;
-    39 | restart | reboot) echo "Restarting Everything"; echo "Shield"; adb connect Shield; adb reboot; echo "Firewalla.RumRunnersIsle"; ssh Firewalla.RumRunnersIsle "sudo reboot"; echo "pwnagotchi"; ssh pwnagotchi "sudo reboot"; echo "Tron"; ssh Tron "sudo reboot"; echo $otherHostname; ssh "sudo reboot"; echo "NetMonitor"; ssh NetMonitor "sudo reboot"; echo "Steamdeck"; ssh Steamdeck "sudo reboot"; echo "Firewalla"; ssh Firewalla "sudo reboot"; echo "PortRoyal"; ssh PortRoyal "reboot"; echo "Firewalla.RumRunnersIsle"; ssh BlackPearl 'psexec -s -i 1 "psshutdown.exe" -r -f -t 0'; echo $myHostname; sudo reboot;;
-    40 | shutdown_pi) echo "Shutting down"; shutdown now;;
-    41 | shutdown) echo "Shutting down everything"; echo "Shield"; adb connect Shield; adb shutdown; echo "Firewalla.RumRunnersIsle"; ssh Firewalla.RumRunnersIsle "sudo shutdown now"; echo "pwnagotchi"; ssh pwnagotchi "sudo reboot"; echo "Tron"; ssh Tron "sudo shutdown now"; echo $otherHostname; ssh "sudo shutdown now"; echo "NetMonitor"; ssh NetMonitor "sudo shutdown now"; echo "Steamdeck"; ssh Steamdeck "sudo shutdown now"; echo "Firewalla"; ssh Firewalla "sudo shutdown now";  echo "Firewalla.RumRunnersIsle"; ssh BlackPearl "psexec -s -i 1 "psshutdown.exe" -f -t 0"; echo $myHostname; sudo shutdown now;;
+    39 | restart_all | reboot_all) 
+        echo "Restarting Everything"
+        for host in "${hosts_reboot[@]}"; do
+            if [[ $host == "Shield" ]]; then
+                adb connect Shield
+                adb reboot
+            elif [[ $host == "BlackPearl" ]]; then
+                ssh BlackPearl 'psexec -s -i 1 "psshutdown.exe" -r -f -t 0'
+            else
+                echo "$host"
+                ssh "$host" "nohup sh -c 'sleep 10; (reboot || sudo reboot)' > /dev/null 2>&1 &"
+            fi
+        done
+        ;;
+    40 | shutdown) echo "Shutting down"; shutdown now;;
+    41 | shutdown_all) 
+        echo "Shutting down everything"
+        for host in "${hosts_shutdown[@]}"; do
+            if [[ $host == "Shield" ]]; then
+                adb connect Shield
+                adb shutdown
+            elif [[ $host == "BlackPearl" ]]; then
+                ssh BlackPearl 'psexec -s -i 1 "psshutdown.exe" -f -t 0'
+            else
+                echo "$host"
+                ssh "$host" "nohup sh -c 'sleep 10; (shutdown now || sudo shutdown now)' > /dev/null 2>&1 &"
+            fi
+        done
+        ;;
     # Locking PC: psexec -s -i 1 \\HOSTNAME "C:\Windows\System32\psshutdown.exe" -l -t 0
     # Sleeping PC: psshutdown -d -t 0
     # Shutdown PC: psshutdown -f -t 0
@@ -88,7 +118,7 @@ perform_action() {
     $((${#options[@]}+1))) exit;;
     *) echo "Invalid option.";;
     esac
-fi
+}
 
 # Check if script was called with an argument
 if [[ ! -z "$1" ]]; then
